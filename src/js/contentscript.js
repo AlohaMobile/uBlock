@@ -102,6 +102,36 @@
 //   https://github.com/gorhill/uBlock/issues/2029
 
 // >>>>>>>> start of HUGE-IF-BLOCK
+
+window.requestIdleCallback =
+    window.requestIdleCallback ||
+    function(cb) {
+        var start = Date.now();
+        return setTimeout(function() {
+            cb({
+                didTimeout: false,
+                timeRemaining: function() {
+                    return Math.max(0, 50 - (Date.now() - start));
+                },
+            });
+        }, 1);
+    };
+
+window.cancelIdleCallback =
+    window.cancelIdleCallback ||
+    function(id) {
+        clearTimeout(id);
+    };
+
+browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "applyCSS") {
+        // Here you can add your CSS dynamically
+        const style = document.createElement('style');
+        style.textContent = request.style;
+        document.head.appendChild(style);
+    }
+});
+    
 if ( typeof vAPI === 'object' && !vAPI.contentScript ) {
 
 /******************************************************************************/

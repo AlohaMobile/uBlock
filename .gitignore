@@ -3,3 +3,7 @@
 __pycache__/
 /dist/build/
 /tmp/
+
+/node_modules/
+/dist/
+.DS_Store

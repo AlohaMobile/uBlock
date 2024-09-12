@@ -78,7 +78,7 @@ filteringBehaviorChanged.throttle = vAPI.defer.create(( ) => {
 });
 filteringBehaviorChanged.history = [];
 filteringBehaviorChanged.max = Math.min(
-    browser.webRequest.MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES - 1,
+    1,// browser.webRequest.MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES - 1,
     19
 );
 

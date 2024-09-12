@@ -641,7 +641,7 @@ const onMessage = function(request, sender, callback) {
 vAPI.messaging.listen({
     name: 'popupPanel',
     listener: onMessage,
-    privileged: true,
+    privileged: false,
 });
 
 // <<<<< end of local scope

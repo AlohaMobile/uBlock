@@ -34,6 +34,12 @@ dist/build/uBlock0.npm: tools/make-nodejs.sh $(sources) $(platform) $(assets)
 # Build the Node.js package.
 npm: dist/build/uBlock0.npm
 
+dist/build/uBlock0.ios: tools/make-ios.sh $(sources) $(platform) $(assets)
+	tools/make-ios.sh all
+
+# Build the extension for iOS.
+ios: dist/build/uBlock0.ios
+
 lint: npm
 	cd dist/build/uBlock0.npm && npm run lint
 

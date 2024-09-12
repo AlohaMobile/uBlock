@@ -517,6 +517,7 @@ dom.on('#firewall .filterExpressions', 'click', 'span[data-expr]', ev => {
 {
     vAPI.localStorage.getItemAsync('firewallFilters').then(v => {
         if ( v === null ) { return; }
+        if ( v instanceof Object ) { return; }
         const filters = v.split(' ');
         if ( filters.shift() !== '00' ) { return; }
         if ( filters.every(v => v === '0') ) { return; }

@@ -414,6 +414,13 @@ try {
     ubolog(`Backend storage for cache will be ${µb.supportStats.cacheBackend}`);
 
     await vAPI.storage.get(createDefaultProps()).then(async fetched => {
+        fetched = {
+            'dynamicFilteringString': µb.dynamicFilteringDefault.join('\n'),
+            'urlFilteringString': '',
+            'hostnameSwitchesString': µb.hostnameSwitchesDefault.join('\n'),
+            'netWhitelist': µb.netWhitelistDefault,
+            'version': '0.0.0.0'
+        };
         ubolog(`Version ready ${Date.now()-vAPI.T0} ms after launch`);
         await onVersionReady(fetched.version);
         return fetched;
@@ -495,15 +502,15 @@ contextMenu.update();
 
 // https://github.com/uBlockOrigin/uBlock-issues/issues/717
 //   Prevent the extension from being restarted mid-session.
-browser.runtime.onUpdateAvailable.addListener(details => {
-    const toInt = vAPI.app.intFromVersion;
-    if (
-        µb.hiddenSettings.extensionUpdateForceReload === true ||
-        toInt(details.version) <= toInt(vAPI.app.version)
-    ) {
-        vAPI.app.restart();
-    }
-});
+// browser.runtime.onUpdateAvailable.addListener(details => {
+//     const toInt = vAPI.app.intFromVersion;
+//     if (
+//         µb.hiddenSettings.extensionUpdateForceReload === true ||
+//         toInt(details.version) <= toInt(vAPI.app.version)
+//     ) {
+//         vAPI.app.restart();
+//     }
+// });
 
 µb.supportStats.allReadyAfter = `${Date.now() - vAPI.T0} ms`;
 if ( selfieIsValid ) {

@@ -56,6 +56,26 @@ import {
 //   hostname. This way, for a specific scheme you can create scope with
 //   rules which will apply only to that scheme.
 
+window.requestIdleCallback =
+    window.requestIdleCallback ||
+    function(cb) {
+        var start = Date.now();
+        return setTimeout(function() {
+            cb({
+                didTimeout: false,
+                timeRemaining: function() {
+                    return Math.max(0, 50 - (Date.now() - start));
+                },
+            });
+        }, 1);
+    };
+
+window.cancelIdleCallback =
+    window.cancelIdleCallback ||
+    function(id) {
+        clearTimeout(id);
+    };
+
 µb.normalizeTabURL = (( ) => {
     const tabURLNormalizer = new URL('about:blank');
 

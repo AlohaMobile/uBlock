@@ -161,7 +161,7 @@ const µBlock = {  // jshint ignore:line
     // Features detection.
     privacySettingsSupported: vAPI.browserSettings instanceof Object,
     cloudStorageSupported: vAPI.cloud instanceof Object,
-    canFilterResponseData: typeof browser.webRequest.filterResponseData === 'function',
+    canFilterResponseData: false, //
 
     // https://github.com/chrisaljoudi/uBlock/issues/180
     // Whitelist directives need to be loaded once the PSL is available

@@ -210,7 +210,9 @@ vAPI.download = function(details) {
 
 /******************************************************************************/
 
-vAPI.getURL = browser.runtime.getURL;
+vAPI.getURL = function(url) {
+    return browser.runtime.getURL(url);
+}
 
 /******************************************************************************/
 
