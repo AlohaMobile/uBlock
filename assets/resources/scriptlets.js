@@ -97,7 +97,7 @@ function safeSelf() {
         },
         initPattern(pattern, options = {}) {
             if ( pattern === '' ) {
-                return { matchAll: true };
+                return { matchAll: true, expect: true };
             }
             const expect = (options.canNegate !== true || pattern.startsWith('!') === false);
             if ( expect === false ) {
@@ -531,7 +531,9 @@ function validateConstantFn(trusted, raw, extraArgs = {}) {
         if ( isNaN(raw) ) { return; }
         if ( Math.abs(raw) > 0x7FFF ) { return; }
     } else if ( trusted ) {
-        if ( raw.startsWith('{') && raw.endsWith('}') ) {
+        if ( raw.startsWith('json:') ) {
+            try { value = safe.JSON_parse(raw.slice(5)); } catch(ex) { return; }
+        } else if ( raw.startsWith('{') && raw.endsWith('}') ) {
             try { value = safe.JSON_parse(raw).value; } catch(ex) { return; }
         }
     } else {
@@ -955,6 +957,33 @@ function objectFindOwnerFn(
 /******************************************************************************/
 
 builtinScriptlets.push({
+    name: 'get-safe-cookie-values.fn',
+    fn: getSafeCookieValuesFn,
+});
+function getSafeCookieValuesFn() {
+    return [
+        'accept', 'reject',
+        'accepted', 'rejected', 'notaccepted',
+        'allow', 'disallow', 'deny',
+        'allowed', 'denied',
+        'approved', 'disapproved',
+        'checked', 'unchecked',
+        'dismiss', 'dismissed',
+        'enable', 'disable',
+        'enabled', 'disabled',
+        'essential', 'nonessential',
+        'hide', 'hidden',
+        'necessary', 'required',
+        'ok',
+        'on', 'off',
+        'true', 't', 'false', 'f',
+        'yes', 'y', 'no', 'n',
+    ];
+}
+
+/******************************************************************************/
+
+builtinScriptlets.push({
     name: 'get-all-cookies.fn',
     fn: getAllCookiesFn,
 });
@@ -1076,6 +1105,7 @@ builtinScriptlets.push({
     name: 'set-local-storage-item.fn',
     fn: setLocalStorageItemFn,
     dependencies: [
+        'get-safe-cookie-values.fn',
         'safe-self.fn',
     ],
 });
@@ -1097,14 +1127,9 @@ function setLocalStorageItemFn(
     const trustedValues = [
         '',
         'undefined', 'null',
-        'false', 'true',
-        'on', 'off',
-        'yes', 'no',
-        'accept', 'reject',
-        'accepted', 'rejected',
-        'allowed', 'denied',
         '{}', '[]', '""',
         '$remove$',
+        ...getSafeCookieValuesFn(),
     ];
 
     if ( trusted ) {
@@ -2104,6 +2129,7 @@ builtinScriptlets.push({
     fn: noFetchIf,
     dependencies: [
         'generate-content.fn',
+        'proxy-apply.fn',
         'safe-self.fn',
     ],
 });
@@ -2126,7 +2152,7 @@ function noFetchIf(
             key = 'url';
             value = condition;
         }
-        needles.push({ key, re: safe.patternToRegex(value) });
+        needles.push({ key, pattern: safe.initPattern(value, { canNegate: true }) });
     }
     const validResponseProps = {
         ok: [ false, true ],
@@ -2150,58 +2176,58 @@ function noFetchIf(
             responseProps.type = { value: responseType };
         }
     }
-    self.fetch = new Proxy(self.fetch, {
-        apply: function(target, thisArg, args) {
-            const details = args[0] instanceof self.Request
-                ? args[0]
-                : Object.assign({ url: args[0] }, args[1]);
-            let proceed = true;
-            try {
-                const props = new Map();
-                for ( const prop in details ) {
-                    let v = details[prop];
-                    if ( typeof v !== 'string' ) {
-                        try { v = safe.JSON_stringify(v); }
-                        catch(ex) { }
-                    }
-                    if ( typeof v !== 'string' ) { continue; }
-                    props.set(prop, v);
+    proxyApplyFn('fetch', function fetch(target, thisArg, args) {
+        const details = args[0] instanceof self.Request
+            ? args[0]
+            : Object.assign({ url: args[0] }, args[1]);
+        let proceed = true;
+        try {
+            const props = new Map();
+            for ( const prop in details ) {
+                let v = details[prop];
+                if ( typeof v !== 'string' ) {
+                    try { v = safe.JSON_stringify(v); }
+                    catch(ex) { }
                 }
-                if ( propsToMatch === '' && responseBody === '' ) {
-                    const out = Array.from(props).map(a => `${a[0]}:${a[1]}`);
-                    safe.uboLog(logPrefix, `Called: ${out.join('\n')}`);
-                    return Reflect.apply(target, thisArg, args);
-                }
-                proceed = needles.length === 0;
-                for ( const { key, re } of needles ) {
-                    if (
-                        props.has(key) === false ||
-                        re.test(props.get(key)) === false
-                    ) {
-                        proceed = true;
-                        break;
-                    }
-                }
-            } catch(ex) {
+                if ( typeof v !== 'string' ) { continue; }
+                props.set(prop, v);
             }
-            if ( proceed ) {
+            if ( safe.logLevel > 1 || propsToMatch === '' && responseBody === '' ) {
+                const out = Array.from(props).map(a => `${a[0]}:${a[1]}`);
+                safe.uboLog(logPrefix, `Called: ${out.join('\n')}`);
+            }
+            if ( propsToMatch === '' && responseBody === '' ) {
                 return Reflect.apply(target, thisArg, args);
             }
-            return generateContentFn(responseBody).then(text => {
-                safe.uboLog(logPrefix, `Prevented with response "${text}"`);
-                const response = new Response(text, {
-                    headers: {
-                        'Content-Length': text.length,
-                    }
-                });
-                const props = Object.assign(
-                    { url: { value: details.url } },
-                    responseProps
-                );
-                safe.Object_defineProperties(response, props);
-                return response;
-            });
+            proceed = needles.length === 0;
+            for ( const { key, pattern } of needles ) {
+                if (
+                    pattern.expect && props.has(key) === false ||
+                    safe.testPattern(pattern, props.get(key)) === false
+                ) {
+                    proceed = true;
+                    break;
+                }
+            }
+        } catch(ex) {
         }
+        if ( proceed ) {
+            return Reflect.apply(target, thisArg, args);
+        }
+        return generateContentFn(responseBody).then(text => {
+            safe.uboLog(logPrefix, `Prevented with response "${text}"`);
+            const response = new Response(text, {
+                headers: {
+                    'Content-Length': text.length,
+                }
+            });
+            const props = Object.assign(
+                { url: { value: details.url } },
+                responseProps
+            );
+            safe.Object_defineProperties(response, props);
+            return response;
+        });
     });
 }
 
@@ -2672,6 +2698,13 @@ function noXhrIf(
         'content-type': '',
         'content-length': '',
     };
+    const safeDispatchEvent = (xhr, type) => {
+        try {
+            xhr.dispatchEvent(new Event(type));
+        } catch(_) {
+        }
+    };
+    const XHRBefore = XMLHttpRequest.prototype;
     self.XMLHttpRequest = class extends self.XMLHttpRequest {
         open(method, url, ...args) {
             xhrInstances.delete(this);
@@ -2698,27 +2731,26 @@ function noXhrIf(
             let promise = Promise.resolve({
                 xhr: this,
                 directive,
-                props: {
-                    readyState: { value: 4 },
+                response: {
                     response: { value: '' },
                     responseText: { value: '' },
                     responseXML: { value: null },
                     responseURL: { value: haystack.url },
-                    status: { value: 200 },
-                    statusText: { value: 'OK' },
-                },
+                }
             });
             switch ( this.responseType ) {
             case 'arraybuffer':
                 promise = promise.then(details => {
-                    details.props.response.value = new ArrayBuffer(0);
+                    const response = details.response;
+                    response.response.value = new ArrayBuffer(0);
                     return details;
                 });
                 haystack.headers['content-type'] = 'application/octet-stream';
                 break;
             case 'blob':
                 promise = promise.then(details => {
-                    details.props.response.value = new Blob([]);
+                    const response = details.response;
+                    response.response.value = new Blob([]);
                     return details;
                 });
                 haystack.headers['content-type'] = 'application/octet-stream';
@@ -2727,8 +2759,9 @@ function noXhrIf(
                 promise = promise.then(details => {
                     const parser = new DOMParser();
                     const doc = parser.parseFromString('', 'text/html');
-                    details.props.response.value = doc;
-                    details.props.responseXML.value = doc;
+                    const response = details.response;
+                    response.response.value = doc;
+                    response.responseXML.value = doc;
                     return details;
                 });
                 haystack.headers['content-type'] = 'text/html';
@@ -2736,8 +2769,9 @@ function noXhrIf(
             }
             case 'json':
                 promise = promise.then(details => {
-                    details.props.response.value = {};
-                    details.props.responseText.value = '{}';
+                    const response = details.response;
+                    response.response.value = {};
+                    response.responseText.value = '{}';
                     return details;
                 });
                 haystack.headers['content-type'] = 'application/json';
@@ -2746,8 +2780,9 @@ function noXhrIf(
                 if ( directive === '' ) { break; }
                 promise = promise.then(details => {
                     return generateContentFn(details.directive).then(text => {
-                        details.props.response.value = text;
-                        details.props.responseText.value = text;
+                        const response = details.response;
+                        response.response.value = text;
+                        response.responseText.value = text;
                         return details;
                     });
                 });
@@ -2755,11 +2790,35 @@ function noXhrIf(
                 break;
             }
             promise.then(details => {
-                haystack.headers['content-length'] = `${details.props.response.value}`.length;
-                Object.defineProperties(details.xhr, details.props);
-                details.xhr.dispatchEvent(new Event('readystatechange'));
-                details.xhr.dispatchEvent(new Event('load'));
-                details.xhr.dispatchEvent(new Event('loadend'));
+                Object.defineProperties(details.xhr, {
+                    readyState: { value: 1, configurable: true },
+                });
+                safeDispatchEvent(details.xhr, 'readystatechange');
+                return details;
+            }).then(details => {
+                const response = details.response;
+                haystack.headers['content-length'] = `${response.response.value}`.length;
+                Object.defineProperties(details.xhr, {
+                    readyState: { value: 2, configurable: true },
+                    status: { value: 200 },
+                    statusText: { value: 'OK' },
+                });
+                safeDispatchEvent(details.xhr, 'readystatechange');
+                return details;
+            }).then(details => {
+                Object.defineProperties(details.xhr, {
+                    readyState: { value: 3, configurable: true },
+                });
+                Object.defineProperties(details.xhr, details.response);
+                safeDispatchEvent(details.xhr, 'readystatechange');
+                return details;
+            }).then(details => {
+                Object.defineProperties(details.xhr, {
+                    readyState: { value: 4 },
+                });
+                safeDispatchEvent(details.xhr, 'readystatechange');
+                safeDispatchEvent(details.xhr, 'load');
+                safeDispatchEvent(details.xhr, 'loadend');
                 safe.uboLog(logPrefix, `Prevented with response:\n${details.xhr.response}`);
             });
         }
@@ -2785,6 +2844,18 @@ function noXhrIf(
             if ( out.length !== 0 ) { out.push(''); }
             return out.join('\r\n');
         }
+    };
+    self.XMLHttpRequest.prototype.open.toString = function() {
+        return XHRBefore.open.toString();
+    };
+    self.XMLHttpRequest.prototype.send.toString = function() {
+        return XHRBefore.send.toString();
+    };
+    self.XMLHttpRequest.prototype.getResponseHeader.toString = function() {
+        return XHRBefore.getResponseHeader.toString();
+    };
+    self.XMLHttpRequest.prototype.getAllResponseHeaders.toString = function() {
+        return XHRBefore.getAllResponseHeaders.toString();
     };
 }
 
@@ -2815,10 +2886,8 @@ function noWindowOpenIf(
         pattern = pattern.slice(1);
     }
     const rePattern = safe.patternToRegex(pattern);
-    let autoRemoveAfter = parseInt(delay);
-    if ( isNaN(autoRemoveAfter) ) {
-        autoRemoveAfter = -1;
-    }
+    const autoRemoveAfter = (parseFloat(delay) || 0) * 1000;
+    const setTimeout = self.setTimeout;
     const createDecoy = function(tag, urlProp, url) {
         const decoyElem = document.createElement(tag);
         decoyElem[urlProp] = url;
@@ -2827,9 +2896,10 @@ function noWindowOpenIf(
         decoyElem.style.setProperty('top','-1px', 'important');
         decoyElem.style.setProperty('width','1px', 'important');
         document.body.appendChild(decoyElem);
-        setTimeout(( ) => { decoyElem.remove(); }, autoRemoveAfter * 1000);
+        setTimeout(( ) => { decoyElem.remove(); }, autoRemoveAfter);
         return decoyElem;
     };
+    const noopFunc = function(){};
     proxyApplyFn('open', function open(target, thisArg, args) {
         const haystack = args.join(' ');
         if ( rePattern.test(haystack) !== targetMatchResult ) {
@@ -2839,7 +2909,13 @@ function noWindowOpenIf(
             return Reflect.apply(target, thisArg, args);
         }
         safe.uboLog(logPrefix, `Prevented (${args.join(', ')})`);
-        if ( autoRemoveAfter < 0 ) { return null; }
+        if ( delay === '' ) { return null; }
+        if ( decoy === 'blank' ) {
+            args[0] = 'about:blank';
+            const r = Reflect.apply(target, thisArg, args);
+            setTimeout(( ) => { r.close(); }, autoRemoveAfter);
+            return r;
+        }
         const decoyElem = decoy === 'obj'
             ? createDecoy('object', 'data', ...args)
             : createDecoy('iframe', 'src', ...args);
@@ -2847,28 +2923,31 @@ function noWindowOpenIf(
         if ( typeof popup === 'object' && popup !== null ) {
             Object.defineProperty(popup, 'closed', { value: false });
         } else {
-            const noopFunc = function open(){};
             popup = new Proxy(self, {
-                get: function(target, prop) {
+                get: function(target, prop, ...args) {
                     if ( prop === 'closed' ) { return false; }
-                    const r = Reflect.get(...arguments);
+                    const r = Reflect.get(target, prop, ...args);
                     if ( typeof r === 'function' ) { return noopFunc; }
-                    return target[prop];
+                    return r;
                 },
-                set: function() {
-                    return Reflect.set(...arguments);
+                set: function(...args) {
+                    return Reflect.set(...args);
                 },
             });
         }
         if ( safe.logLevel !== 0 ) {
             popup = new Proxy(popup, {
-                get: function(target, prop) {
-                    safe.uboLog(logPrefix, 'window.open / get', prop, '===', target[prop]);
-                    return Reflect.get(...arguments);
+                get: function(target, prop, ...args) {
+                    const r = Reflect.get(target, prop, ...args);
+                    safe.uboLog(logPrefix, `popup / get ${prop} === ${r}`);
+                    if ( typeof r === 'function' ) {
+                        return (...args) => { return r.call(target, ...args); };
+                    }
+                    return r;
                 },
-                set: function(target, prop, value) {
-                    safe.uboLog(logPrefix, 'window.open / set', prop, '=', value);
-                    return Reflect.set(...arguments);
+                set: function(target, prop, value, ...args) {
+                    safe.uboLog(logPrefix, `popup / set ${prop} = ${value}`);
+                    return Reflect.set(target, prop, value, ...args);
                 },
             });
         }
@@ -3269,6 +3348,9 @@ function xmlPrune(
                     const serializer = new XMLSerializer();
                     const textout = serializer.serializeToString(thisArg.responseXML);
                     Object.defineProperty(thisArg, 'responseText', { value: textout });
+                    if ( typeof thisArg.response === 'string' ) {
+                        Object.defineProperty(thisArg, 'response', { value: textout });
+                    }
                     return;
                 }
                 if (
@@ -3819,6 +3901,7 @@ builtinScriptlets.push({
     fn: setCookie,
     world: 'ISOLATED',
     dependencies: [
+        'get-safe-cookie-values.fn',
         'safe-self.fn',
         'set-cookie.fn',
     ],
@@ -3831,27 +3914,10 @@ function setCookie(
     if ( name === '' ) { return; }
     const safe = safeSelf();
     const logPrefix = safe.makeLogPrefix('set-cookie', name, value, path);
-
-    const validValues = [
-        'accept', 'reject',
-        'accepted', 'rejected', 'notaccepted',
-        'allow', 'deny',
-        'allowed', 'disallow',
-        'enable', 'disable',
-        'enabled', 'disabled',
-        'ok',
-        'on', 'off',
-        'true', 't', 'false', 'f',
-        'yes', 'y', 'no', 'n',
-        'necessary', 'required',
-        'approved', 'disapproved',
-        'hide', 'hidden',
-        'essential', 'nonessential',
-        'dismiss', 'dismissed',
-    ];
     const normalized = value.toLowerCase();
     const match = /^("?)(.+)\1$/.exec(normalized);
     const unquoted = match && match[2] || normalized;
+    const validValues = getSafeCookieValuesFn();
     if ( validValues.includes(unquoted) === false ) {
         if ( /^\d+$/.test(unquoted) === false ) { return; }
         const n = parseInt(value, 10);
@@ -4854,14 +4920,17 @@ builtinScriptlets.push({
 });
 function trustedReplaceOutboundText(
     propChain = '',
-    pattern = '',
-    replacement = '',
+    rawPattern = '',
+    rawReplacement = '',
     ...args
 ) {
     if ( propChain === '' ) { return; }
     const safe = safeSelf();
-    const logPrefix = safe.makeLogPrefix('trusted-replace-outbound-text', propChain, pattern, replacement, ...args);
-    const rePattern = safe.patternToRegex(pattern);
+    const logPrefix = safe.makeLogPrefix('trusted-replace-outbound-text', propChain, rawPattern, rawReplacement, ...args);
+    const rePattern = safe.patternToRegex(rawPattern);
+    const replacement = rawReplacement.startsWith('json:')
+        ? safe.JSON_parse(rawReplacement.slice(5))
+        : rawReplacement;
     const extraArgs = safe.getExtraArgs(args);
     const reCondition = safe.patternToRegex(extraArgs.condition || '');
     const reflector = proxyApplyFn(propChain, function(...args) {
@@ -4871,7 +4940,7 @@ function trustedReplaceOutboundText(
             try { textBefore = self.atob(encodedTextBefore); }
             catch(ex) { return encodedTextBefore; }
         }
-        if ( pattern === '' ) {
+        if ( rawPattern === '' ) {
             safe.uboLog(logPrefix, 'Decoded outbound text:\n', textBefore);
             return encodedTextBefore;
         }
