@@ -891,7 +891,6 @@ const bodyFilterer = (( ) => {
             this.modified = true;
         }
         static doFilter(requestId, fctxt, jobs) {
-            return;
             if ( jobs.length === 0 ) { return; }
             const session = new Session(fctxt, mime, charset, jobs);
             session.stream = browser.webRequest.filterResponseData(requestId);

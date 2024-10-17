@@ -32,7 +32,6 @@ import webext from './webext.js';
 const manifest = browser.runtime.getManifest();
 
 vAPI.cantWebsocket =
-    browser.webRequest instanceof Object === false ||
     browser.webRequest.ResourceType instanceof Object === false  ||
     browser.webRequest.ResourceType.WEBSOCKET !== 'websocket';
 
@@ -135,7 +134,7 @@ vAPI.sessionStorage = browser.storage.session || {
  * 
  * */
 
-vAPI.storage = browser.storage.local || {
+vAPI.storage = {
     get(key, ...args) {
         return webext.storage.local.get(key, ...args).catch(reason => {
             console.log(reason);
@@ -156,7 +155,7 @@ vAPI.storage = browser.storage.local || {
             console.log(reason);
         });
     },
-    QUOTA_BYTES: 10000000, //browser.storage.local.QUOTA_BYTES,
+    QUOTA_BYTES: browser.storage.local.QUOTA_BYTES,
 };
 
 // Not all platforms support getBytesInUse
@@ -283,9 +282,9 @@ const toTabId = function(tabId) {
 
 vAPI.Tabs = class {
     constructor() {
-        // browser.webNavigation.onCreatedNavigationTarget.addListener(details => {
-        //     this.onCreatedNavigationTargetHandler(details);
-        // });
+        browser.webNavigation.onCreatedNavigationTarget.addListener(details => {
+            this.onCreatedNavigationTargetHandler(details);
+        });
         browser.webNavigation.onCommitted.addListener(details => {
             const { frameId, tabId } = details;
             if ( frameId === 0 && tabId > 0 && details.transitionType === 'reload' ) {
@@ -350,11 +349,9 @@ vAPI.Tabs = class {
             details.cssOrigin = 'user';
         }
         try {
-            browser.tabs.sendMessage(tabId, { action: "applyCSS", style:details.code });
             await webext.tabs.insertCSS(...arguments);
         }
         catch(reason) {
-            console.log(reason);
         }
     }
 
@@ -1182,13 +1179,13 @@ vAPI.messaging = {
         shortSecrets.splice(pos, 1);
     };
 
-    // browser.webRequest.onBeforeRequest.addListener(
-    //     guard,
-    //     {
-    //         urls: [ root + 'web_accessible_resources/*' ]
-    //     },
-    //     [ 'blocking' ]
-    // );
+    browser.webRequest.onBeforeRequest.addListener(
+        guard,
+        {
+            urls: [ root + 'web_accessible_resources/*' ]
+        },
+        [ 'blocking' ]
+    );
 
     vAPI.warSecret = {
         short: ( ) => {
@@ -1221,12 +1218,12 @@ vAPI.Net = class {
     constructor() {
         this.validTypes = new Set();
         {
-            // const wrrt = browser.webRequest.ResourceType;
-            // for ( const typeKey in wrrt ) {
-            //     if ( hasOwnProperty(wrrt, typeKey) ) {
-            //         this.validTypes.add(wrrt[typeKey]);
-            //     }
-            // }
+            const wrrt = browser.webRequest.ResourceType;
+            for ( const typeKey in wrrt ) {
+                if ( hasOwnProperty(wrrt, typeKey) ) {
+                    this.validTypes.add(wrrt[typeKey]);
+                }
+            }
         }
         this.suspendableListener = undefined;
         this.deferredSuspendableListener = undefined;
@@ -1234,17 +1231,17 @@ vAPI.Net = class {
         this.suspendDepth = 0;
         this.unprocessedTabs = new Map();
 
-        // browser.webRequest.onBeforeRequest.addListener(
-        //     details => {
-        //         this.normalizeDetails(details);
-        //         if ( this.suspendDepth !== 0 && details.tabId >= 0 ) {
-        //             return this.suspendOneRequest(details);
-        //         }
-        //         return this.onBeforeSuspendableRequest(details);
-        //     },
-        //     this.denormalizeFilters({ urls: [ 'http://*/*', 'https://*/*' ] }),
-        //     [ 'blocking' ]
-        // );
+        browser.webRequest.onBeforeRequest.addListener(
+            details => {
+                this.normalizeDetails(details);
+                if ( this.suspendDepth !== 0 && details.tabId >= 0 ) {
+                    return this.suspendOneRequest(details);
+                }
+                return this.onBeforeSuspendableRequest(details);
+            },
+            this.denormalizeFilters({ urls: [ 'http://*/*', 'https://*/*' ] }),
+            [ 'blocking' ]
+        );
 
         vAPI.setDefaultIcon('-loading', '');
     }
@@ -1280,11 +1277,11 @@ vAPI.Net = class {
     addListener(which, clientListener, filters, options) {
         const actualFilters = this.denormalizeFilters(filters);
         const actualListener = this.makeNewListenerProxy(clientListener);
-        // browser.webRequest[which].addListener(
-        //     actualListener,
-        //     actualFilters,
-        //     options
-        // );
+        browser.webRequest[which].addListener(
+            actualListener,
+            actualFilters,
+            options
+        );
     }
     onBeforeSuspendableRequest(details) {
         if ( this.suspendableListener !== undefined ) {
@@ -1323,7 +1320,7 @@ vAPI.Net = class {
         const actualListener = this.listenerMap.get(clientListener);
         if ( actualListener === undefined ) { return; }
         this.listenerMap.delete(clientListener);
-        // browser.webRequest[which].removeListener(actualListener);
+        browser.webRequest[which].removeListener(actualListener);
     }
     makeNewListenerProxy(clientListener) {
         const actualListener = details => {
@@ -1334,7 +1331,7 @@ vAPI.Net = class {
         return actualListener;
     }
     handlerBehaviorChanged() {
-        // browser.webRequest.handlerBehaviorChanged();
+        browser.webRequest.handlerBehaviorChanged();
     }
     onUnprocessedRequest(details) {
         const { tabId } = details;
@@ -1416,7 +1413,7 @@ vAPI.contextMenu = webext.menus && {
         this._hash = hash;
         webext.menus.removeAll();
         for ( const entry of entries ) {
-//            webext.menus.create(JSON.parse(JSON.stringify(entry)));
+            webext.menus.create(JSON.parse(JSON.stringify(entry)));
         }
         const n = entries.length;
         callback = callback || null;
