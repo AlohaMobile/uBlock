@@ -31,6 +31,10 @@
     "message": "modo de filtragem",
     "description": "Label in the popup panel for the current filtering mode"
   },
+  "popupTipReport": {
+    "message": "Relatar um problema neste website",
+    "description": "Tooltip used for the 'chat' icon in the panel"
+  },
   "popupTipDashboard": {
     "message": "Abrir o painel de controlo",
     "description": "English: Click to open the dashboard"
@@ -99,6 +103,70 @@
     "message": "Dependências externas (compatíveis com GPLv3):",
     "description": "Shown in the About pane"
   },
+  "supportS6H": {
+    "message": "Relatar um problema de filtro",
+    "description": "Header of 'Report a filter issue' section in Support pane"
+  },
+  "supportS3P1": {
+    "message": "Relate problemas de filtros em websites específicos no rastreador de problemas <span data-url=\"https://github.com/uBlockOrigin/uAssets/issues?q=is%3Aissue\"><code>uBlockOrigin/uAssets</code></span>. <u>Requer uma conta no GitHub.</u>",
+    "description": "First paragraph of 'Filter issues' section in Support pane"
+  },
+  "supportS6P1S1": {
+    "message": "Para evitar sobrecarregar os voluntários com relatórios duplicados, por favor verifique se o problema ainda não foi relatado.",
+    "description": "A paragraph in the filter issue reporter section"
+  },
+  "supportFindSpecificButton": {
+    "message": "Encontrar relatórios semelhantes",
+    "description": "A clickable link in the filter issue reporter section"
+  },
+  "supportS6URL": {
+    "message": "Endereço da página web:",
+    "description": "Label for the URL of the page"
+  },
+  "supportS6Select1": {
+    "message": "A página web...",
+    "description": "Label for widget to select type of issue"
+  },
+  "supportS6Select1Option0": {
+    "message": "-- Escolha uma entrada --",
+    "description": "An entry in the widget used to select the type of issue"
+  },
+  "supportS6Select1Option1": {
+    "message": "Mostra anúncios ou restos de anúncios",
+    "description": "An entry in the widget used to select the type of issue"
+  },
+  "supportS6Select1Option2": {
+    "message": "Tem sobreposições ou outros incómodos",
+    "description": "An entry in the widget used to select the type of issue"
+  },
+  "supportS6Select1Option3": {
+    "message": "Deteta uBO Lite",
+    "description": "An entry in the widget used to select the type of issue"
+  },
+  "supportS6Select1Option4": {
+    "message": "Tem problemas relacionados com a privacidade",
+    "description": "An entry in the widget used to select the type of issue"
+  },
+  "supportS6Select1Option5": {
+    "message": "Falha quando o uBO Lite é ativado",
+    "description": "An entry in the widget used to select the type of issue"
+  },
+  "supportS6Select1Option6": {
+    "message": "Abre separadores ou janelas indesejáveis",
+    "description": "An entry in the widget used to select the type of issue"
+  },
+  "supportS6Select1Option7": {
+    "message": "Leva a badware e phishing",
+    "description": "An entry in the widget used to select the type of issue"
+  },
+  "supportS6Checkbox1": {
+    "message": "Classifica a página web como “NSFW” (<a href=\"https://pt.wikipedia.org/wiki/Not_safe_for_work\">“Não segura para o trabalho”</a>)",
+    "description": "A checkbox to use for NSFW sites"
+  },
+  "supportReportSpecificButton": {
+    "message": "Criar novo relatório",
+    "description": "Text for button which open an external webpage in Support pane"
+  },
   "firstRunSectionLabel": {
     "message": "Bem-vindo(a)",
     "description": "The header text for the welcome message section"
@@ -144,11 +212,11 @@
     "description": "This describes the 'complete' filtering mode"
   },
   "noFilteringModeDescription": {
-    "message": "Lista de nomes de anfitriões para os quais não será efetuada qualquer filtragem.",
+    "message": "Lista de nomes de websites para os quais não será efetuada qualquer filtragem.",
     "description": "A short description for the editable field which lists trusted sites"
   },
   "noFilteringModePlaceholder": {
-    "message": "[hostnames only]\nexemplo.com\njogos.exemplo\n...",
+    "message": "[apenas nomes de anfitriões]\nexemplo.com\njogos.exemplo\n...",
     "description": "Default text for in edit field"
   },
   "behaviorSectionLabel": {

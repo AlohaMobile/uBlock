@@ -319,6 +319,8 @@ onBroadcast(msg => {
         cnameIgnoreRootDocument: µbhs.cnameIgnoreRootDocument,
         cnameMaxTTL: µbhs.cnameMaxTTL,
         cnameReplayFullURL: µbhs.cnameReplayFullURL,
+        dnsCacheTTL: µbhs.dnsCacheTTL,
+        dnsResolveEnabled: µbhs.dnsResolveEnabled,
     });
 });
 

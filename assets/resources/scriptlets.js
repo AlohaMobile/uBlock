@@ -173,36 +173,58 @@ function safeSelf() {
     scriptletGlobals.safeSelf = safe;
     if ( scriptletGlobals.bcSecret === undefined ) { return safe; }
     // This is executed only when the logger is opened
-    const bc = new self.BroadcastChannel(scriptletGlobals.bcSecret);
-    let bcBuffer = [];
     safe.logLevel = scriptletGlobals.logLevel || 1;
-    safe.sendToLogger = (type, ...args) => {
+    let lastLogType = '';
+    let lastLogText = '';
+    let lastLogTime = 0;
+    safe.toLogText = (type, ...args) => {
         if ( args.length === 0 ) { return; }
         const text = `[${document.location.hostname || document.location.href}]${args.join(' ')}`;
-        if ( bcBuffer === undefined ) {
-            return bc.postMessage({ what: 'messageToLogger', type, text });
+        if ( text === lastLogText && type === lastLogType ) {
+            if ( (Date.now() - lastLogTime) < 5000 ) { return; }
         }
-        bcBuffer.push({ type, text });
+        lastLogType = type;
+        lastLogText = text;
+        lastLogTime = Date.now();
+        return text;
     };
-    bc.onmessage = ev => {
-        const msg = ev.data;
-        switch ( msg ) {
-        case 'iamready!':
-            if ( bcBuffer === undefined ) { break; }
-            bcBuffer.forEach(({ type, text }) =>
-                bc.postMessage({ what: 'messageToLogger', type, text })
-            );
-            bcBuffer = undefined;
-            break;
-        case 'setScriptletLogLevelToOne':
-            safe.logLevel = 1;
-            break;
-        case 'setScriptletLogLevelToTwo':
-            safe.logLevel = 2;
-            break;
-        }
-    };
-    bc.postMessage('areyouready?');
+    try {
+        const bc = new self.BroadcastChannel(scriptletGlobals.bcSecret);
+        let bcBuffer = [];
+        safe.sendToLogger = (type, ...args) => {
+            const text = safe.toLogText(type, ...args);
+            if ( text === undefined ) { return; }
+            if ( bcBuffer === undefined ) {
+                return bc.postMessage({ what: 'messageToLogger', type, text });
+            }
+            bcBuffer.push({ type, text });
+        };
+        bc.onmessage = ev => {
+            const msg = ev.data;
+            switch ( msg ) {
+            case 'iamready!':
+                if ( bcBuffer === undefined ) { break; }
+                bcBuffer.forEach(({ type, text }) =>
+                    bc.postMessage({ what: 'messageToLogger', type, text })
+                );
+                bcBuffer = undefined;
+                break;
+            case 'setScriptletLogLevelToOne':
+                safe.logLevel = 1;
+                break;
+            case 'setScriptletLogLevelToTwo':
+                safe.logLevel = 2;
+                break;
+            }
+        };
+        bc.postMessage('areyouready?');
+    } catch(_) {
+        safe.sendToLogger = (type, ...args) => {
+            const text = safe.toLogText(type, ...args);
+            if ( text === undefined ) { return; }
+            safe.log(`uBO ${text}`);
+        };
+    }
     return safe;
 }
 
@@ -312,6 +334,9 @@ function runAtHtmlElementFn(fn) {
 
 // Reference:
 // https://github.com/AdguardTeam/Scriptlets/blob/master/wiki/about-scriptlets.md#prevent-xhr
+//
+// Added `trusted` argument to allow for returning arbitrary text. Can only
+// be used through scriptlets requiring trusted source.
 
 builtinScriptlets.push({
     name: 'generate-content.fn',
@@ -320,7 +345,7 @@ builtinScriptlets.push({
         'safe-self.fn',
     ],
 });
-function generateContentFn(directive) {
+function generateContentFn(trusted, directive) {
     const safe = safeSelf();
     const randomize = len => {
         const chunks = [];
@@ -334,27 +359,27 @@ function generateContentFn(directive) {
         return chunks.join(' ').slice(0, len);
     };
     if ( directive === 'true' ) {
-        return Promise.resolve(randomize(10));
+        return randomize(10);
     }
     if ( directive === 'emptyObj' ) {
-        return Promise.resolve('{}');
+        return '{}';
     }
     if ( directive === 'emptyArr' ) {
-        return Promise.resolve('[]');
+        return '[]';
     }
     if ( directive === 'emptyStr' ) {
-        return Promise.resolve('');
+        return '';
     }
     if ( directive.startsWith('length:') ) {
         const match = /^length:(\d+)(?:-(\d+))?$/.exec(directive);
-        if ( match ) {
-            const min = parseInt(match[1], 10);
-            const extent = safe.Math_max(parseInt(match[2], 10) || 0, min) - min;
-            const len = safe.Math_min(min + extent * safe.Math_random(), 500000);
-            return Promise.resolve(randomize(len | 0));
-        }
+        if ( match === null ) { return ''; }
+        const min = parseInt(match[1], 10);
+        const extent = safe.Math_max(parseInt(match[2], 10) || 0, min) - min;
+        const len = safe.Math_min(min + extent * safe.Math_random(), 500000);
+        return randomize(len | 0);
     }
-    if ( directive.startsWith('war:') && scriptletGlobals.warOrigin ) {
+    if ( directive.startsWith('war:') ) {
+        if ( scriptletGlobals.warOrigin === undefined ) { return ''; }
         return new Promise(resolve => {
             const warOrigin = scriptletGlobals.warOrigin;
             const warName = directive.slice(4);
@@ -370,9 +395,12 @@ function generateContentFn(directive) {
             };
             warXHR.open('GET', fullpath.join(''));
             warXHR.send();
-        });
+        }).catch(( ) => '');
     }
-    return Promise.resolve('');
+    if ( trusted ) {
+        return directive;
+    }
+    return '';
 }
 
 /******************************************************************************/
@@ -526,6 +554,8 @@ function validateConstantFn(trusted, raw, extraArgs = {}) {
         value = function(){ return true; };
     } else if ( raw === 'falseFunc' ) {
         value = function(){ return false; };
+    } else if ( raw === 'throwFunc' ) {
+        value = function(){ throw ''; };
     } else if ( /^-?\d+$/.test(raw) ) {
         value = parseInt(raw);
         if ( isNaN(raw) ) { return; }
@@ -972,6 +1002,7 @@ function getSafeCookieValuesFn() {
         'enable', 'disable',
         'enabled', 'disabled',
         'essential', 'nonessential',
+        'forbidden', 'forever',
         'hide', 'hidden',
         'necessary', 'required',
         'ok',
@@ -1488,27 +1519,261 @@ function proxyApplyFn(
     }
     const fn = context[prop];
     if ( typeof fn !== 'function' ) { return; }
+    if ( proxyApplyFn.CtorContext === undefined ) {
+        proxyApplyFn.ctorContexts = [];
+        proxyApplyFn.CtorContext = class {
+            constructor(...args) {
+                this.init(...args);
+            }
+            init(callFn, callArgs) {
+                this.callFn = callFn;
+                this.callArgs = callArgs;
+                return this;
+            }
+            reflect() {
+                const r = Reflect.construct(this.callFn, this.callArgs);
+                this.callFn = this.callArgs = undefined;
+                proxyApplyFn.ctorContexts.push(this);
+                return r;
+            }
+            static factory(...args) {
+                return proxyApplyFn.ctorContexts.length !== 0
+                    ? proxyApplyFn.ctorContexts.pop().init(...args)
+                    : new proxyApplyFn.CtorContext(...args);
+            }
+        };
+        proxyApplyFn.applyContexts = [];
+        proxyApplyFn.ApplyContext = class {
+            constructor(...args) {
+                this.init(...args);
+            }
+            init(callFn, thisArg, callArgs) {
+                this.callFn = callFn;
+                this.thisArg = thisArg;
+                this.callArgs = callArgs;
+                return this;
+            }
+            reflect() {
+                const r = Reflect.apply(this.callFn, this.thisArg, this.callArgs);
+                this.callFn = this.thisArg = this.callArgs = undefined;
+                proxyApplyFn.applyContexts.push(this);
+                return r;
+            }
+            static factory(...args) {
+                return proxyApplyFn.applyContexts.length !== 0
+                    ? proxyApplyFn.applyContexts.pop().init(...args)
+                    : new proxyApplyFn.ApplyContext(...args);
+            }
+        };
+    }
     const fnStr = fn.toString();
     const toString = (function toString() { return fnStr; }).bind(null);
-    if ( fn.prototype && fn.prototype.constructor === fn ) {
-        context[prop] = new Proxy(fn, {
-            construct: handler,
-            get(target, prop, receiver) {
-                if ( prop === 'toString' ) { return toString; }
-                return Reflect.get(target, prop, receiver);
-            },
-        });
-        return (...args) => Reflect.construct(...args);
-    }
-    context[prop] = new Proxy(fn, {
-        apply: handler,
-        get(target, prop, receiver) {
-            if ( prop === 'toString' ) { return toString; }
-            return Reflect.get(target, prop, receiver);
+    const proxyDetails = {
+        apply(target, thisArg, args) {
+            return handler(proxyApplyFn.ApplyContext.factory(target, thisArg, args));
         },
-    });
-    return (...args) => Reflect.apply(...args);
+        get(target, prop) {
+            if ( prop === 'toString' ) { return toString; }
+            return Reflect.get(target, prop);
+        },
+    };
+    if ( fn.prototype?.constructor === fn ) {
+        proxyDetails.construct = function(target, args) {
+            return handler(proxyApplyFn.CtorContext.factory(target, args));
+        };
+    }
+    context[prop] = new Proxy(fn, proxyDetails);
 }
+
+/******************************************************************************/
+
+builtinScriptlets.push({
+    name: 'prevent-xhr.fn',
+    fn: preventXhrFn,
+    dependencies: [
+        'generate-content.fn',
+        'match-object-properties.fn',
+        'parse-properties-to-match.fn',
+        'safe-self.fn',
+    ],
+});
+function preventXhrFn(
+    trusted = false,
+    propsToMatch = '',
+    directive = ''
+) {
+    if ( typeof propsToMatch !== 'string' ) { return; }
+    const safe = safeSelf();
+    const scriptletName = trusted ? 'trusted-prevent-xhr' : 'prevent-xhr';
+    const logPrefix = safe.makeLogPrefix(scriptletName, propsToMatch, directive);
+    const xhrInstances = new WeakMap();
+    const propNeedles = parsePropertiesToMatch(propsToMatch, 'url');
+    const warOrigin = scriptletGlobals.warOrigin;
+    const safeDispatchEvent = (xhr, type) => {
+        try {
+            xhr.dispatchEvent(new Event(type));
+        } catch(_) {
+        }
+    };
+    const XHRBefore = XMLHttpRequest.prototype;
+    self.XMLHttpRequest = class extends self.XMLHttpRequest {
+        open(method, url, ...args) {
+            xhrInstances.delete(this);
+            if ( warOrigin !== undefined && url.startsWith(warOrigin) ) {
+                return super.open(method, url, ...args);
+            }
+            const haystack = { method, url };
+            if ( propsToMatch === '' && directive === '' ) {
+                safe.uboLog(logPrefix, `Called: ${safe.JSON_stringify(haystack, null, 2)}`);
+                return super.open(method, url, ...args);
+            }
+            if ( matchObjectProperties(propNeedles, haystack) ) {
+                const xhrDetails = Object.assign(haystack, {
+                    xhr: this,
+                    defer: args.length === 0 || !!args[0],
+                    directive,
+                    headers: {
+                        'date': '',
+                        'content-type': '',
+                        'content-length': '',
+                    },
+                    props: {
+                        response: { value: '' },
+                        responseText: { value: '' },
+                        responseXML: { value: null },
+                        responseURL: { value: haystack.url },
+                    },
+                });
+                xhrInstances.set(this, xhrDetails);
+            }
+            return super.open(method, url, ...args);
+        }
+        send(...args) {
+            const xhrDetails = xhrInstances.get(this);
+            if ( xhrDetails === undefined ) {
+                return super.send(...args);
+            }
+            xhrDetails.headers['date'] = (new Date()).toUTCString();
+            let xhrText = '';
+            switch ( this.responseType ) {
+            case 'arraybuffer':
+                xhrDetails.props.response.value = new ArrayBuffer(0);
+                xhrDetails.headers['content-type'] = 'application/octet-stream';
+                break;
+            case 'blob':
+                xhrDetails.props.response.value = new Blob([]);
+                xhrDetails.headers['content-type'] = 'application/octet-stream';
+                break;
+            case 'document': {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString('', 'text/html');
+                xhrDetails.props.response.value = doc;
+                xhrDetails.props.responseXML.value = doc;
+                xhrDetails.headers['content-type'] = 'text/html';
+                break;
+            }
+            case 'json':
+                xhrDetails.props.response.value = {};
+                xhrDetails.props.responseText.value = '{}';
+                xhrDetails.headers['content-type'] = 'application/json';
+                break;
+            default: {
+                if ( directive === '' ) { break; }
+                xhrText = generateContentFn(trusted, xhrDetails.directive);
+                if ( xhrText instanceof Promise ) {
+                    xhrText = xhrText.then(text => {
+                        xhrDetails.props.response.value = text;
+                        xhrDetails.props.responseText.value = text;
+                    });
+                } else {
+                    xhrDetails.props.response.value = xhrText;
+                    xhrDetails.props.responseText.value = xhrText;
+                }
+                xhrDetails.headers['content-type'] = 'text/plain';
+                break;
+            }
+            }
+            if ( xhrDetails.defer === false ) {
+                xhrDetails.headers['content-length'] = `${xhrDetails.props.response.value}`.length;
+                Object.defineProperties(xhrDetails.xhr, {
+                    readyState: { value: 4 },
+                    status: { value: 200 },
+                    statusText: { value: 'OK' },
+                });
+                Object.defineProperties(xhrDetails.xhr, xhrDetails.props);
+                return;
+            }
+            Promise.resolve(xhrText).then(( ) => xhrDetails).then(details => {
+                Object.defineProperties(details.xhr, {
+                    readyState: { value: 1, configurable: true },
+                });
+                safeDispatchEvent(details.xhr, 'readystatechange');
+                return details;
+            }).then(details => {
+                xhrDetails.headers['content-length'] = `${details.props.response.value}`.length;
+                Object.defineProperties(details.xhr, {
+                    readyState: { value: 2, configurable: true },
+                    status: { value: 200 },
+                    statusText: { value: 'OK' },
+                });
+                safeDispatchEvent(details.xhr, 'readystatechange');
+                return details;
+            }).then(details => {
+                Object.defineProperties(details.xhr, {
+                    readyState: { value: 3, configurable: true },
+                });
+                Object.defineProperties(details.xhr, details.props);
+                safeDispatchEvent(details.xhr, 'readystatechange');
+                return details;
+            }).then(details => {
+                Object.defineProperties(details.xhr, {
+                    readyState: { value: 4 },
+                });
+                safeDispatchEvent(details.xhr, 'readystatechange');
+                safeDispatchEvent(details.xhr, 'load');
+                safeDispatchEvent(details.xhr, 'loadend');
+                safe.uboLog(logPrefix, `Prevented with response:\n${details.xhr.response}`);
+            });
+        }
+        getResponseHeader(headerName) {
+            const xhrDetails = xhrInstances.get(this);
+            if ( xhrDetails === undefined || this.readyState < this.HEADERS_RECEIVED ) {
+                return super.getResponseHeader(headerName);
+            }
+            const value = xhrDetails.headers[headerName.toLowerCase()];
+            if ( value !== undefined && value !== '' ) { return value; }
+            return null;
+        }
+        getAllResponseHeaders() {
+            const xhrDetails = xhrInstances.get(this);
+            if ( xhrDetails === undefined || this.readyState < this.HEADERS_RECEIVED ) {
+                return super.getAllResponseHeaders();
+            }
+            const out = [];
+            for ( const [ name, value ] of Object.entries(xhrDetails.headers) ) {
+                if ( !value ) { continue; }
+                out.push(`${name}: ${value}`);
+            }
+            if ( out.length !== 0 ) { out.push(''); }
+            return out.join('\r\n');
+        }
+    };
+    self.XMLHttpRequest.prototype.open.toString = function() {
+        return XHRBefore.open.toString();
+    };
+    self.XMLHttpRequest.prototype.send.toString = function() {
+        return XHRBefore.send.toString();
+    };
+    self.XMLHttpRequest.prototype.getResponseHeader.toString = function() {
+        return XHRBefore.getResponseHeader.toString();
+    };
+    self.XMLHttpRequest.prototype.getAllResponseHeaders.toString = function() {
+        return XHRBefore.getAllResponseHeaders.toString();
+    };
+}
+
+
+
 
 /*******************************************************************************
 
@@ -1771,18 +2036,19 @@ function addEventListenerDefuser(
         return matchesBoth;
     };
     runAt(( ) => {
-        proxyApplyFn('EventTarget.prototype.addEventListener', function(target, thisArg, args) {
+        proxyApplyFn('EventTarget.prototype.addEventListener', function(context) {
+            const { callArgs, thisArg } = context;
             let t, h;
             try {
-                t = String(args[0]);
-                if ( typeof args[1] === 'function' ) {
-                    h = String(safe.Function_toString(args[1]));
-                } else if ( typeof args[1] === 'object' && args[1] !== null ) {
-                    if ( typeof args[1].handleEvent === 'function' ) {
-                        h = String(safe.Function_toString(args[1].handleEvent));
+                t = String(callArgs[0]);
+                if ( typeof callArgs[1] === 'function' ) {
+                    h = String(safe.Function_toString(callArgs[1]));
+                } else if ( typeof callArgs[1] === 'object' && callArgs[1] !== null ) {
+                    if ( typeof callArgs[1].handleEvent === 'function' ) {
+                        h = String(safe.Function_toString(callArgs[1].handleEvent));
                     }
                 } else {
-                    h = String(args[1]);
+                    h = String(callArgs[1]);
                 }
             } catch(ex) {
             }
@@ -1791,7 +2057,7 @@ function addEventListenerDefuser(
             } else if ( shouldPrevent(thisArg, t, h) ) {
                 return safe.uboLog(logPrefix, `Prevented: ${t}\n${h}\n${elementDetails(thisArg)}`);
             }
-            return Reflect.apply(target, thisArg, args);
+            return context.reflect();
         });
     }, extraArgs.runAt);
 }
@@ -2176,10 +2442,11 @@ function noFetchIf(
             responseProps.type = { value: responseType };
         }
     }
-    proxyApplyFn('fetch', function fetch(target, thisArg, args) {
-        const details = args[0] instanceof self.Request
-            ? args[0]
-            : Object.assign({ url: args[0] }, args[1]);
+    proxyApplyFn('fetch', function fetch(context) {
+        const { callArgs } = context;
+        const details = callArgs[0] instanceof self.Request
+            ? callArgs[0]
+            : Object.assign({ url: callArgs[0] }, callArgs[1]);
         let proceed = true;
         try {
             const props = new Map();
@@ -2197,7 +2464,7 @@ function noFetchIf(
                 safe.uboLog(logPrefix, `Called: ${out.join('\n')}`);
             }
             if ( propsToMatch === '' && responseBody === '' ) {
-                return Reflect.apply(target, thisArg, args);
+                return context.reflect();
             }
             proceed = needles.length === 0;
             for ( const { key, pattern } of needles ) {
@@ -2212,9 +2479,9 @@ function noFetchIf(
         } catch(ex) {
         }
         if ( proceed ) {
-            return Reflect.apply(target, thisArg, args);
+            return context.reflect();
         }
-        return generateContentFn(responseBody).then(text => {
+        return Promise.resolve(generateContentFn(false, responseBody)).then(text => {
             safe.uboLog(logPrefix, `Prevented with response "${text}"`);
             const response = new Response(text, {
                 headers: {
@@ -2520,14 +2787,15 @@ function noSetIntervalIf(
         delay = parseInt(delay, 10);
     }
     const reNeedle = safe.patternToRegex(needle);
-    proxyApplyFn('setInterval', function setInterval(target, thisArg, args) {
-        const a = args[0] instanceof Function
-            ? String(safe.Function_toString(args[0]))
-            : String(args[0]);
-        const b = args[1];
+    proxyApplyFn('setInterval', function setInterval(context) {
+        const { callArgs } = context;
+        const a = callArgs[0] instanceof Function
+            ? String(safe.Function_toString(callArgs[0]))
+            : String(callArgs[0]);
+        const b = callArgs[1];
         if ( needle === '' && delay === undefined ) {
             safe.uboLog(logPrefix, `Called:\n${a}\n${b}`);
-            return Reflect.apply(target, thisArg, args);
+            return context.reflect();
         }
         let defuse;
         if ( needle !== '' ) {
@@ -2537,10 +2805,10 @@ function noSetIntervalIf(
             defuse = (b === delay || isNaN(b) && isNaN(delay) ) !== delayNot;
         }
         if ( defuse ) {
-            args[0] = function(){};
+            callArgs[0] = function(){};
             safe.uboLog(logPrefix, `Prevented:\n${a}\n${b}`);
         }
-        return Reflect.apply(target, thisArg, args);
+        return context.reflect();
     });
 }
 
@@ -2576,14 +2844,15 @@ function noSetTimeoutIf(
         delay = parseInt(delay, 10);
     }
     const reNeedle = safe.patternToRegex(needle);
-    proxyApplyFn('setTimeout', function setTimeout(target, thisArg, args) {
-        const a = args[0] instanceof Function
-            ? String(safe.Function_toString(args[0]))
-            : String(args[0]);
-        const b = args[1];
+    proxyApplyFn('setTimeout', function setTimeout(context) {
+        const { callArgs } = context;
+        const a = callArgs[0] instanceof Function
+            ? String(safe.Function_toString(callArgs[0]))
+            : String(callArgs[0]);
+        const b = callArgs[1];
         if ( needle === '' && delay === undefined ) {
             safe.uboLog(logPrefix, `Called:\n${a}\n${b}`);
-            return Reflect.apply(target, thisArg, args);
+            return context.reflect();
         }
         let defuse;
         if ( needle !== '' ) {
@@ -2593,10 +2862,10 @@ function noSetTimeoutIf(
             defuse = (b === delay || isNaN(b) && isNaN(delay) ) !== delayNot;
         }
         if ( defuse ) {
-            args[0] = function(){};
+            callArgs[0] = function(){};
             safe.uboLog(logPrefix, `Prevented:\n${a}\n${b}`);
         }
-        return Reflect.apply(target, thisArg, args);
+        return context.reflect();
     });
 }
 
@@ -2671,201 +2940,58 @@ function webrtcIf(
 /******************************************************************************/
 
 builtinScriptlets.push({
-    name: 'no-xhr-if.js',
+    name: 'prevent-xhr.js',
     aliases: [
-        'prevent-xhr.js',
+        'no-xhr-if.js',
     ],
-    fn: noXhrIf,
+    fn: preventXhr,
     dependencies: [
-        'generate-content.fn',
-        'match-object-properties.fn',
-        'parse-properties-to-match.fn',
-        'safe-self.fn',
+        'prevent-xhr.fn',
     ],
 });
-function noXhrIf(
-    propsToMatch = '',
-    directive = ''
-) {
-    if ( typeof propsToMatch !== 'string' ) { return; }
-    const safe = safeSelf();
-    const logPrefix = safe.makeLogPrefix('prevent-xhr', propsToMatch, directive);
-    const xhrInstances = new WeakMap();
-    const propNeedles = parsePropertiesToMatch(propsToMatch, 'url');
-    const warOrigin = scriptletGlobals.warOrigin;
-    const headers = {
-        'date': '',
-        'content-type': '',
-        'content-length': '',
-    };
-    const safeDispatchEvent = (xhr, type) => {
-        try {
-            xhr.dispatchEvent(new Event(type));
-        } catch(_) {
-        }
-    };
-    const XHRBefore = XMLHttpRequest.prototype;
-    self.XMLHttpRequest = class extends self.XMLHttpRequest {
-        open(method, url, ...args) {
-            xhrInstances.delete(this);
-            if ( warOrigin !== undefined && url.startsWith(warOrigin) ) {
-                return super.open(method, url, ...args);
-            }
-            const haystack = { method, url };
-            if ( propsToMatch === '' && directive === '' ) {
-                safe.uboLog(logPrefix, `Called: ${safe.JSON_stringify(haystack, null, 2)}`);
-                return super.open(method, url, ...args);
-            }
-            if ( matchObjectProperties(propNeedles, haystack) ) {
-                xhrInstances.set(this, haystack);
-            }
-            haystack.headers = Object.assign({}, headers);
-            return super.open(method, url, ...args);
-        }
-        send(...args) {
-            const haystack = xhrInstances.get(this);
-            if ( haystack === undefined ) {
-                return super.send(...args);
-            }
-            haystack.headers['date'] = (new Date()).toUTCString();
-            let promise = Promise.resolve({
-                xhr: this,
-                directive,
-                response: {
-                    response: { value: '' },
-                    responseText: { value: '' },
-                    responseXML: { value: null },
-                    responseURL: { value: haystack.url },
-                }
-            });
-            switch ( this.responseType ) {
-            case 'arraybuffer':
-                promise = promise.then(details => {
-                    const response = details.response;
-                    response.response.value = new ArrayBuffer(0);
-                    return details;
-                });
-                haystack.headers['content-type'] = 'application/octet-stream';
-                break;
-            case 'blob':
-                promise = promise.then(details => {
-                    const response = details.response;
-                    response.response.value = new Blob([]);
-                    return details;
-                });
-                haystack.headers['content-type'] = 'application/octet-stream';
-                break;
-            case 'document': {
-                promise = promise.then(details => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString('', 'text/html');
-                    const response = details.response;
-                    response.response.value = doc;
-                    response.responseXML.value = doc;
-                    return details;
-                });
-                haystack.headers['content-type'] = 'text/html';
-                break;
-            }
-            case 'json':
-                promise = promise.then(details => {
-                    const response = details.response;
-                    response.response.value = {};
-                    response.responseText.value = '{}';
-                    return details;
-                });
-                haystack.headers['content-type'] = 'application/json';
-                break;
-            default:
-                if ( directive === '' ) { break; }
-                promise = promise.then(details => {
-                    return generateContentFn(details.directive).then(text => {
-                        const response = details.response;
-                        response.response.value = text;
-                        response.responseText.value = text;
-                        return details;
-                    });
-                });
-                haystack.headers['content-type'] = 'text/plain';
-                break;
-            }
-            promise.then(details => {
-                Object.defineProperties(details.xhr, {
-                    readyState: { value: 1, configurable: true },
-                });
-                safeDispatchEvent(details.xhr, 'readystatechange');
-                return details;
-            }).then(details => {
-                const response = details.response;
-                haystack.headers['content-length'] = `${response.response.value}`.length;
-                Object.defineProperties(details.xhr, {
-                    readyState: { value: 2, configurable: true },
-                    status: { value: 200 },
-                    statusText: { value: 'OK' },
-                });
-                safeDispatchEvent(details.xhr, 'readystatechange');
-                return details;
-            }).then(details => {
-                Object.defineProperties(details.xhr, {
-                    readyState: { value: 3, configurable: true },
-                });
-                Object.defineProperties(details.xhr, details.response);
-                safeDispatchEvent(details.xhr, 'readystatechange');
-                return details;
-            }).then(details => {
-                Object.defineProperties(details.xhr, {
-                    readyState: { value: 4 },
-                });
-                safeDispatchEvent(details.xhr, 'readystatechange');
-                safeDispatchEvent(details.xhr, 'load');
-                safeDispatchEvent(details.xhr, 'loadend');
-                safe.uboLog(logPrefix, `Prevented with response:\n${details.xhr.response}`);
-            });
-        }
-        getResponseHeader(headerName) {
-            const haystack = xhrInstances.get(this);
-            if ( haystack === undefined || this.readyState < this.HEADERS_RECEIVED ) {
-                return super.getResponseHeader(headerName);
-            }
-            const value = haystack.headers[headerName.toLowerCase()];
-            if ( value !== undefined && value !== '' ) { return value; }
-            return null;
-        }
-        getAllResponseHeaders() {
-            const haystack = xhrInstances.get(this);
-            if ( haystack === undefined || this.readyState < this.HEADERS_RECEIVED ) {
-                return super.getAllResponseHeaders();
-            }
-            const out = [];
-            for ( const [ name, value ] of Object.entries(haystack.headers) ) {
-                if ( !value ) { continue; }
-                out.push(`${name}: ${value}`);
-            }
-            if ( out.length !== 0 ) { out.push(''); }
-            return out.join('\r\n');
-        }
-    };
-    self.XMLHttpRequest.prototype.open.toString = function() {
-        return XHRBefore.open.toString();
-    };
-    self.XMLHttpRequest.prototype.send.toString = function() {
-        return XHRBefore.send.toString();
-    };
-    self.XMLHttpRequest.prototype.getResponseHeader.toString = function() {
-        return XHRBefore.getResponseHeader.toString();
-    };
-    self.XMLHttpRequest.prototype.getAllResponseHeaders.toString = function() {
-        return XHRBefore.getAllResponseHeaders.toString();
-    };
+function preventXhr(...args) {
+    return preventXhrFn(false, ...args);
 }
 
-/******************************************************************************/
+/**
+ * @scriptlet prevent-window-open
+ * 
+ * @description
+ * Prevent a webpage from opening new tabs through `window.open()`.
+ * 
+ * @param pattern
+ * A plain string or regex to match against the `url` argument for the
+ * prevention to be triggered. If not provided, all calls to `window.open()`
+ * are prevented.
+ * If set to the special value `debug` *and* the logger is opened, the scriptlet
+ * will trigger a `debugger` statement and the prevention will not occur.
+ * 
+ * @param [delay]
+ * If provided, a decoy will be created or opened, and this parameter states
+ * the number of seconds to wait for before the decoy is terminated, i.e.
+ * either removed from the DOM or closed.
+ * 
+ * @param [decoy]
+ * A string representing the type of decoy to use:
+ * - `blank`: replace the `url` parameter with `about:blank`
+ * - `object`: create and append an `object` element to the DOM, and return
+ *   its `contentWindow` property.
+ * - `frame`: create and append an `iframe` element to the DOM, and return
+ *   its `contentWindow` property.
+ * 
+ * @example
+ * ##+js(prevent-window-open, ads.example.com/)
+ * 
+ * @example
+ * ##+js(prevent-window-open, ads.example.com/, 1, iframe)
+ * 
+ * */
 
 builtinScriptlets.push({
-    name: 'no-window-open-if.js',
+    name: 'prevent-window-open.js',
     aliases: [
         'nowoif.js',
-        'prevent-window-open.js',
+        'no-window-open-if.js',
         'window.open-defuser.js',
     ],
     fn: noWindowOpenIf,
@@ -2900,25 +3026,30 @@ function noWindowOpenIf(
         return decoyElem;
     };
     const noopFunc = function(){};
-    proxyApplyFn('open', function open(target, thisArg, args) {
-        const haystack = args.join(' ');
+    proxyApplyFn('open', function open(context) {
+        if ( pattern === 'debug' && safe.logLevel !== 0 ) {
+            debugger; // eslint-disable-line no-debugger
+            return context.reflect();
+        }
+        const { callArgs } = context;
+        const haystack = callArgs.join(' ');
         if ( rePattern.test(haystack) !== targetMatchResult ) {
             if ( safe.logLevel > 1 ) {
-                safe.uboLog(logPrefix, `Allowed (${args.join(', ')})`);
+                safe.uboLog(logPrefix, `Allowed (${callArgs.join(', ')})`);
             }
-            return Reflect.apply(target, thisArg, args);
+            return context.reflect();
         }
-        safe.uboLog(logPrefix, `Prevented (${args.join(', ')})`);
+        safe.uboLog(logPrefix, `Prevented (${callArgs.join(', ')})`);
         if ( delay === '' ) { return null; }
         if ( decoy === 'blank' ) {
-            args[0] = 'about:blank';
-            const r = Reflect.apply(target, thisArg, args);
+            callArgs[0] = 'about:blank';
+            const r = context.reflect();
             setTimeout(( ) => { r.close(); }, autoRemoveAfter);
             return r;
         }
         const decoyElem = decoy === 'obj'
-            ? createDecoy('object', 'data', ...args)
-            : createDecoy('iframe', 'src', ...args);
+            ? createDecoy('object', 'data', ...callArgs)
+            : createDecoy('iframe', 'src', ...callArgs);
         let popup = decoyElem.contentWindow;
         if ( typeof popup === 'object' && popup !== null ) {
             Object.defineProperty(popup, 'closed', { value: false });
@@ -3077,11 +3208,11 @@ function alertBuster() {
         apply: function(a) {
             console.info(a);
         },
-        get(target, prop, receiver) {
+        get(target, prop) {
             if ( prop === 'toString' ) {
                 return target.toString.bind(target);
             }
-            return Reflect.get(target, prop, receiver);
+            return Reflect.get(target, prop);
         },
     });
 }
@@ -3804,7 +3935,7 @@ function spoofCSS(
             const targetElements = new WeakSet(document.querySelectorAll(selector));
             if ( targetElements.has(args[0]) === false ) { return style; }
             const proxiedStyle = new Proxy(style, {
-                get(target, prop, receiver) {
+                get(target, prop) {
                     if ( typeof target[prop] === 'function' ) {
                         if ( prop === 'getPropertyValue' ) {
                             return cloackFunc(function getPropertyValue(prop) {
@@ -3816,7 +3947,7 @@ function spoofCSS(
                     if ( instanceProperties.includes(prop) ) {
                         return Reflect.get(target, prop);
                     }
-                    return spoofStyle(prop, Reflect.get(target, prop, receiver));
+                    return spoofStyle(prop, Reflect.get(target, prop));
                 },
                 getOwnPropertyDescriptor(target, prop) {
                     if ( propToValueMap.has(prop) ) {
@@ -3832,11 +3963,11 @@ function spoofCSS(
             });
             return proxiedStyle;
         },
-        get(target, prop, receiver) {
+        get(target, prop) {
             if ( prop === 'toString' ) {
                 return target.toString.bind(target);
             }
-            return Reflect.get(target, prop, receiver);
+            return Reflect.get(target, prop);
         },
     });
     Element.prototype.getBoundingClientRect = new Proxy(Element.prototype.getBoundingClientRect, {
@@ -3855,11 +3986,11 @@ function spoofCSS(
             }
             return new self.DOMRect(rect.x, rect.y, width, height);
         },
-        get(target, prop, receiver) {
+        get(target, prop) {
             if ( prop === 'toString' ) {
                 return target.toString.bind(target);
             }
-            return Reflect.get(target, prop, receiver);
+            return Reflect.get(target, prop);
         },
     });
 }
@@ -4850,8 +4981,8 @@ function trustedPruneOutboundObject(
     if ( propChain === '' ) { return; }
     const safe = safeSelf();
     const extraArgs = safe.getExtraArgs(Array.from(arguments), 3);
-    const reflector = proxyApplyFn(propChain, function(...args) {
-        const objBefore = reflector(...args);
+    proxyApplyFn(propChain, function(context) {
+        const objBefore = context.reflect();
         if ( objBefore instanceof Object === false ) { return objBefore; }
         const objAfter = objectPruneFn(
             objBefore,
@@ -4884,26 +5015,27 @@ function trustedReplaceArgument(
     if ( propChain === '' ) { return; }
     const safe = safeSelf();
     const logPrefix = safe.makeLogPrefix('trusted-replace-argument', propChain, argposRaw, argraw);
-    const argpos = parseInt(argposRaw, 10) || 0;
+    const argoffset = parseInt(argposRaw, 10) || 0;
     const extraArgs = safe.getExtraArgs(Array.from(arguments), 3);
     const normalValue = validateConstantFn(true, argraw, extraArgs);
     const reCondition = extraArgs.condition
         ? safe.patternToRegex(extraArgs.condition)
         : /^/;
-    const reflector = proxyApplyFn(propChain, function(...args) {
+    proxyApplyFn(propChain, function(context) {
+        const { callArgs } = context;
         if ( argposRaw === '' ) {
-            safe.uboLog(logPrefix, `Arguments:\n${args.join('\n')}`);
-            return reflector(...args);
+            safe.uboLog(logPrefix, `Arguments:\n${callArgs.join('\n')}`);
+            return context.reflect();
         }
-        const arglist = args[args.length-1];
-        if ( Array.isArray(arglist) === false ) { return reflector(...args); }
-        const argBefore = arglist[argpos];
-        if ( safe.RegExp_test.call(reCondition, argBefore) === false ) {
-            return reflector(...args);
+        const argpos = argoffset >= 0 ? argoffset : callArgs.length - argoffset;
+        if ( argpos >= 0 && argpos < callArgs.length ) {
+            const argBefore = callArgs[argpos];
+            if ( safe.RegExp_test.call(reCondition, argBefore) ) {
+                callArgs[argpos] = normalValue;
+                safe.uboLog(logPrefix, `Replaced argument:\nBefore: ${JSON.stringify(argBefore)}\nAfter: ${normalValue}`);
+            }
         }
-        arglist[argpos] = normalValue;
-        safe.uboLog(logPrefix, `Replaced argument:\nBefore: ${JSON.stringify(argBefore)}\nAfter: ${normalValue}`);
-        return reflector(...args);
+        return context.reflect();
     });
 }
 
@@ -4933,8 +5065,8 @@ function trustedReplaceOutboundText(
         : rawReplacement;
     const extraArgs = safe.getExtraArgs(args);
     const reCondition = safe.patternToRegex(extraArgs.condition || '');
-    const reflector = proxyApplyFn(propChain, function(...args) {
-        const encodedTextBefore = reflector(...args);
+    proxyApplyFn(propChain, function(context) {
+        const encodedTextBefore = context.reflect();
         let textBefore = encodedTextBefore;
         if ( extraArgs.encoding === 'base64' ) {
             try { textBefore = self.atob(encodedTextBefore); }
@@ -5011,37 +5143,193 @@ function trustedSuppressNativeMethod(
             return { type: 'exact', value: undefined };
         }
     });
-    const reflector = proxyApplyFn(methodPath, function(...args) {
+    proxyApplyFn(methodPath, function(context) {
+        const { callArgs } = context;
         if ( signature === '' ) {
-            safe.uboLog(logPrefix, `Arguments:\n${args.join('\n')}`);
-            return reflector(...args);
+            safe.uboLog(logPrefix, `Arguments:\n${callArgs.join('\n')}`);
+            return context.reflect();
         }
-        const arglist = args[args.length-1];
-        if ( Array.isArray(arglist) === false ) {
-            return reflector(...args);
-        }
-        if ( arglist.length < signatureArgs.length ) {
-            return reflector(...args);
+        if ( callArgs.length < signatureArgs.length ) {
+            return context.reflect();
         }
         for ( let i = 0; i < signatureArgs.length; i++ ) {
             const signatureArg = signatureArgs[i];
             if ( signatureArg === undefined ) { continue; }
-            const targetArg = arglist[i];
+            const targetArg = callArgs[i];
             if ( signatureArg.type === 'exact' ) {
                 if ( targetArg !== signatureArg.value ) {
-                    return reflector(...args);
+                    return context.reflect();
                 }
             }
             if ( signatureArg.type === 'pattern' ) {
                 if ( safe.RegExp_test.call(signatureArg.re, targetArg) === false ) {
-                    return reflector(...args);
+                    return context.reflect();
                 }
             }
         }
-        safe.uboLog(logPrefix, `Suppressed:\n${args.join('\n')}`);
+        safe.uboLog(logPrefix, `Suppressed:\n${callArgs.join('\n')}`);
         if ( how === 'abort' ) {
             throw new ReferenceError();
         }
+    });
+}
+
+/*******************************************************************************
+ * 
+ * Trusted version of prevent-xhr(), which allows the use of an arbitrary
+ * string as response text.
+ * 
+ * */
+
+builtinScriptlets.push({
+    name: 'trusted-prevent-xhr.js',
+    requiresTrust: true,
+    fn: trustedPreventXhr,
+    dependencies: [
+        'prevent-xhr.fn',
+    ],
+});
+function trustedPreventXhr(...args) {
+    return preventXhrFn(true, ...args);
+}
+
+/**
+ * @trustedScriptlet trusted-prevent-dom-bypass
+ * 
+ * @description
+ * Prevent the bypassing of uBO scriptlets through anonymous embedded context.
+ * 
+ * Ensure that a target method in the embedded context is using the
+ * corresponding parent context's method (which is assumed to be
+ * properly patched), or to replace the embedded context with that of the
+ * parent context.
+ * 
+ * Root issue:
+ * https://issues.chromium.org/issues/40202434
+ * 
+ * @param methodPath
+ * The method which calls must be intercepted. The arguments
+ * of the intercepted calls are assumed to be HTMLElement, anything else will
+ * be ignored.
+ * 
+ * @param [targetProp]
+ * The method in the embedded context which should be delegated to the
+ * parent context. If no method is specified, the embedded context becomes
+ * the parent one, i.e. all  properties of the embedded context will be that
+ * of the parent context.
+ * 
+ * @example
+ * ##+js(trusted-prevent-dom-bypass, Element.prototype.append, open)
+ * 
+ * @example
+ * ##+js(trusted-prevent-dom-bypass, Element.prototype.appendChild, XMLHttpRequest)
+ * 
+ * */
+
+builtinScriptlets.push({
+    name: 'trusted-prevent-dom-bypass.js',
+    requiresTrust: true,
+    fn: trustedPreventDomBypass,
+    dependencies: [
+        'proxy-apply.fn',
+        'safe-self.fn',
+    ],
+});
+function trustedPreventDomBypass(
+    methodPath = '',
+    targetProp = ''
+) {
+    if ( methodPath === '' ) { return; }
+    const safe = safeSelf();
+    const logPrefix = safe.makeLogPrefix('trusted-prevent-dom-bypass', methodPath, targetProp);
+    proxyApplyFn(methodPath, function(context) {
+        const elems = new Set(context.callArgs.filter(e => e instanceof HTMLElement));
+        const r = context.reflect();
+        if ( elems.length === 0 ) { return r; }
+        for ( const elem of elems ) {
+            try {
+                if ( `${elem.contentWindow}` !== '[object Window]' ) { continue; }
+                if ( elem.contentWindow.location.href !== 'about:blank' ) {
+                    if ( elem.contentWindow.location.href !== self.location.href ) {
+                        continue;
+                    }
+                }
+                if ( targetProp !== '' ) {
+                    elem.contentWindow[targetProp] = self[targetProp];
+                } else {
+                    Object.defineProperty(elem, 'contentWindow', { value: self });
+                }
+                safe.uboLog(logPrefix, 'Bypass prevented');
+            } catch(_) {
+            }
+        }
+        return r;
+    });
+}
+
+/**
+ * @trustedScriptlet trusted-override-element-method
+ * 
+ * @description
+ * Override the behavior of a method on matching elements.
+ * 
+ * @param methodPath
+ * The method which calls must be intercepted.
+ * 
+ * @param [selector]
+ * A CSS selector which the target element must match. If not specified,
+ * the override will occur for all elements.
+ * 
+ * @param [disposition]
+ * How the override should be handled. If not specified, the overridden call
+ * will be equivalent to an empty function. If set to `throw`, an exception
+ * will be thrown. Any other value will be validated and returned as a
+ * supported safe constant.
+ * 
+ * @example
+ * ##+js(trusted-override-element-method, HTMLAnchorElement.prototype.click, a[target="_blank"][style])
+ * 
+ * */
+
+builtinScriptlets.push({
+    name: 'trusted-override-element-method.js',
+    requiresTrust: true,
+    fn: trustedOverrideElementMethod,
+    dependencies: [
+        'proxy-apply.fn',
+        'safe-self.fn',
+        'validate-constant.fn',
+    ],
+});
+function trustedOverrideElementMethod(
+    methodPath = '',
+    selector = '',
+    disposition = ''
+) {
+    if ( methodPath === '' ) { return; }
+    const safe = safeSelf();
+    const logPrefix = safe.makeLogPrefix('trusted-override-element-method', methodPath, selector, disposition);
+    proxyApplyFn(methodPath, function(context) {
+        let override = selector === '';
+        if ( override === false ) {
+            const { thisArg } = context;
+            try {
+                override = thisArg.closest(selector) === thisArg;
+            } catch(_) {
+            }
+        }
+        if ( override === false ) {
+            return context.reflect();
+        }
+        safe.uboLog(logPrefix, 'Overridden');
+        if ( disposition === '' ) { return; }
+        if ( disposition === 'debug' && safe.logLevel !== 0 ) {
+            debugger; // eslint-disable-line no-debugger
+        }
+        if ( disposition === 'throw' ) {
+            throw new ReferenceError();
+        }
+        return validateConstantFn(false, disposition);
     });
 }
 

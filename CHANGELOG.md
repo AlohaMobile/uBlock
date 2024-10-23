@@ -1,3 +1,38 @@
+- [Remove `64:ff9b:` as private network block](https://github.com/gorhill/uBlock/commit/2621c908c3)
+- [Ensure `urlskip=` redirects only to `https:`](https://github.com/gorhill/uBlock/commit/32f27c5131)
+- [Add support to `urlskip=` media resources](https://github.com/gorhill/uBlock/commit/ce9fc5dc14)
+- [Add `-uricomponent` to `urlskip=` option](https://github.com/gorhill/uBlock/commit/01eebffc1f)
+- [Add `forbidden`/`forever` as safe cookie values](https://github.com/gorhill/uBlock/commit/4d982d9972) (by @ryanbr)
+- [Add regex extraction transformation step to `urlskip=` option](https://github.com/gorhill/uBlock/commit/c86ed5287b)
+- [Improve `prevent-window-open` scriptlet](https://github.com/gorhill/uBlock/commit/85877b12ed)
+- [Add support to parse Adguard's `[$domain=/.../]` regex-based modifier](https://github.com/gorhill/uBlock/commit/58bfe4c846)
+- [Validate result type of XPath expressions](https://github.com/gorhill/uBlock/commit/c746633693)
+- [Fix npm test suite](https://github.com/gorhill/uBlock/commit/818cb2d801)
+- [Add ability to lookup parameter name in `urlskip=`](https://github.com/gorhill/uBlock/commit/64b2086ba4)
+- [Mind that BroadcastChannel contructor can throw in Firefox](https://github.com/gorhill/uBlock/commit/6d2b3375f8)
+- [Add `trusted-override-element-method` scriptlet](https://github.com/gorhill/uBlock/commit/95b0ce5e3a)
+- [Add `trusted-prevent-dom-bypass` scriptlet](https://github.com/gorhill/uBlock/commit/1abc864742)
+- [Improve `prevent-xhr` scriptlet; add `trusted-prevent-xhr` scriptlet](https://github.com/gorhill/uBlock/commit/fe49ced2ac)
+- [Skip dns resolution when requests are proxied through http](https://github.com/gorhill/uBlock/commit/4305bfbdb1)
+- [Blocking large media elements also prevents autoplay, regardless of size](https://github.com/gorhill/uBlock/commit/73ce4e6bcf)
+- [Do not discard `!#else` block for unknown preprocessor tokens](https://github.com/gorhill/uBlock/commit/6cac645830)
+- [Add ability to decode base64 in `urlskip=`](https://github.com/gorhill/uBlock/commit/e81e70937f)
+- [Fix images not properly downloading on click](https://github.com/gorhill/uBlock/commit/aec0bd39e3)
+
+----------
+
+# 1.60.0
+
+## Fixes / changes
+
+- [Add advanced setting `dnsResolveEnabled`](https://github.com/gorhill/uBlock/commit/760b2ffce6)
+- [Fix contextual menu quirks](https://github.com/gorhill/uBlock/commit/0a6dc47a72)
+- [Fix exception thrown in `spoof-css` in Firefox](https://github.com/gorhill/uBlock/commit/11c3a16036)
+- [Throttle down repeated scriptlet logging information](https://github.com/gorhill/uBlock/commit/e8f6f3ddff)
+- [Improve scriptlet helper `proxy-apply`](https://github.com/gorhill/uBlock/commit/547fae4842)
+- [Add an entry in _Report_ page for badware/phishing category](https://github.com/gorhill/uBlock/commit/e18a3707c7)
+- [New static network filter option `urlskip=`](https://github.com/gorhill/uBlock/commit/266ec4894b)
+- [Rewrite cname uncloaking code to account for new `ipaddress=` option](https://github.com/gorhill/uBlock/commit/6acf97bf51)
 - [Avoid using dns.resolve() for proxied DNS resolution](https://github.com/gorhill/uBlock/commit/d5f14ffa32)
 - [Add support for `lan`/`loopback` values to `ipaddress=` option](https://github.com/gorhill/uBlock/commit/030d7334e4)
 - [New static network filter option `ipaddress=`](https://github.com/gorhill/uBlock/commit/c6dedd253f)
@@ -9,6 +44,7 @@
 - [Add ability to directly evaluate static network filtering engine](https://github.com/gorhill/uBlock/commit/b7ed3b45ed)
 - [Fix `prevent-window-open` for when logger is open](https://github.com/gorhill/uBlock/commit/f552f655cb)
 - [Improve `prevent-window-open` scriptlet](https://github.com/gorhill/uBlock/commit/7f11d6216e)
+- [Improve `validate-constant` scriptlet helper](https://github.com/gorhill/uBlock/commit/ae5dc6299e)
 - [Improve `trusted-replace-outbound-text` scriptlet](https://github.com/gorhill/uBlock/commit/0dcb985601)
 - [Improve `prevent-xhr` scriptlet](https://github.com/gorhill/uBlock/commit/3a249f395c)
 - [Add noop resources for redirect purpose](https://github.com/gorhill/uBlock/commit/59a9a43a83)
