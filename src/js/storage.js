@@ -1206,9 +1206,9 @@ onBroadcast(msg => {
         const fetcher = (path, options = undefined) => {
             if ( path.startsWith('/web_accessible_resources/') ) {
                 path += `?secret=${vAPI.warSecret.short()}`;
-                return io.fetch(browser.runtime.getURL('') + path, options); // TODO: [adblock] commit
+                return io.fetch(browser.runtime.getURL('') + path, options); // Aloha-specific
             }
-            return io.fetchText(browser.runtime.getURL('') + path); // TODO: [adblock] commit
+            return io.fetchText(browser.runtime.getURL('') + path); // Aloha-specific
         };
 
         const fetchPromises = [
